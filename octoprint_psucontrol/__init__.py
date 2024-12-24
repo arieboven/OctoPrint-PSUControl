@@ -66,6 +66,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
         self._idleCountdown = None
         self._idleStartTime = 0
         self._idleTimeLeft = None
+        self._idleTimerOverride = False
         self._waitForHeaters = False
         self._skipIdleTimer = False
         self._configuredGPIOPins = {}
@@ -336,7 +337,9 @@ class PSUControl(octoprint.plugin.StartupPlugin,
                 (self.config['enableSideBar'] and self.config['enableIdleCountdownTimerSideBar']))
 
     def _refresh_countdown(self):
-        if self._idleStartTime == 0 or not self.config['powerOffWhenIdle'] or not self._countdown_visible() or self._printer.is_printing() or self._printer.is_paused():
+        if self._idleStartTime == 0 or not self.config['powerOffWhenIdle'] or \
+                not self._countdown_visible() or self._idleTimerOverride or \
+                self._printer.is_printing() or self._printer.is_paused():
             self.idleTimeLeft = None
         else:
             self.idleTimeLeft = time.strftime("%-M:%S", time.gmtime((self.config['idleTimeout'] * 60) - (time.time() - self._idleStartTime)))
@@ -345,7 +348,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
     def _start_idle_timer(self):
         self._stop_idle_timer()
 
-        if self.config['powerOffWhenIdle'] and self.isPSUOn:
+        if self.config['powerOffWhenIdle'] and self.isPSUOn and not self._idleTimerOverride:
             self._idleTimer = ResettableTimer(self.config['idleTimeout'] * 60, self._idle_poweroff)
             self._idleCountdown = RepeatedTimer(1.0, self._refresh_countdown)
             self._idleTimer.start()
@@ -381,6 +384,9 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             return
 
         if self._printer.is_printing() or self._printer.is_paused():
+            return
+
+        if self._idleTimerOverride:
             return
 
         self._logger.info("Idle timeout reached after {} minute(s). Turning heaters off prior to shutting off PSU.".format(self.config['idleTimeout']))
@@ -610,6 +616,14 @@ class PSUControl(octoprint.plugin.StartupPlugin,
         return self.isPSUOn
 
 
+    def set_idle_timer_override(self, state):
+        self._idleTimerOverride = state
+        if state:
+            self._stop_idle_timer()
+        else:
+            self._start_idle_timer()
+
+
     def turn_on_before_printing_after_upload(self):
         if ( self.config['turnOnWhenApiUploadPrint'] and
              not self.isPSUOn and
@@ -634,7 +648,8 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             turnPSUOn=[],
             turnPSUOff=[],
             togglePSU=[],
-            getPSUState=[]
+            getPSUState=[],
+            setPsuOverride=["state"],
         )
 
 
@@ -643,7 +658,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
 
 
     def on_api_command(self, command, data):
-        if command in ['turnPSUOn', 'turnPSUOff', 'togglePSU']:
+        if command in ['turnPSUOn', 'turnPSUOff', 'togglePSU', "setPsuOverride"]:
             try:
                 if not Permissions.PLUGIN_PSUCONTROL_CONTROL.can():
                     return make_response("Insufficient rights", 403)
@@ -669,6 +684,9 @@ class PSUControl(octoprint.plugin.StartupPlugin,
                 self.turn_psu_on()
         elif command == 'getPSUState':
             return jsonify(isPSUOn=self.isPSUOn)
+        elif command == "setPsuOverride":
+            if 'state' in data.keys():
+                self.set_idle_timer_override(data['state'])
 
 
     def on_settings_save(self, data):

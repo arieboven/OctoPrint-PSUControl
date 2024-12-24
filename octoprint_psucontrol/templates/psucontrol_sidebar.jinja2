@@ -1,6 +1,9 @@
 <div class="row-fluid">
         <div id="psucontrolsb">
            <button class="btn btn-block" id="power_switch" data-bind="click: togglePSU, enable: loginState.isUser(), visible: (isPSUOn() !== undefined)"><i class="fas fa-bolt"></i> <span data-bind="visible: !isPSUOn()">Power On</span><span data-bind="visible: isPSUOn()">Power Off</span></button>
+            <div id="override">
+                <label class="checkbox"><input type="checkbox" id="psucontrol_override" data-bind="checked: idleTimerOverride, enable: isPSUOn()">Keep printer on</label>
+            </div>
             <div id="idleCountdownTimer" data-bind="visible: settings.plugins.psucontrol.enableIdleCountdownTimerSideBar">
                 <hr>
                 <span title="Idle timer remaining before turning off">Idle timer</span>: <strong data-bind="text: idleTimeLeftString"></strong><br>

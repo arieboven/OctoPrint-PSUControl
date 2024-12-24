@@ -20,6 +20,8 @@ $(function() {
             return "-";
         });
 
+        self.idleTimerOverride = ko.observable(undefined);
+
         self.psu_indicator = $("#psucontrol_indicator");
         self.psu_switch = $("#sidebar_plugin_psucontrol_wrapper");
 
@@ -98,7 +100,8 @@ $(function() {
                 } else {
                     self.psu_indicator.removeClass("psu_on").addClass("psu_off");
                     self.psu_switch.removeClass("psu_on").addClass("psu_off");
-                }   
+                }
+                self.idleTimerOverride(false);
             });
 
             $.ajax({
@@ -168,6 +171,21 @@ $(function() {
                 contentType: "application/json; charset=UTF-8"
             })
         };
+
+        self.setIdleTimerOverride = function() {
+            $.ajax({
+                url: API_BASEURL + "plugin/psucontrol",
+                type: "POST",
+                dataType: "json",
+                data: JSON.stringify({
+                    command: "setPsuOverride",
+                    state: self.idleTimerOverride()
+                }),
+                contentType: "application/json; charset=UTF-8"
+            })
+        };
+
+        self.idleTimerOverride.subscribe(self.setIdleTimerOverride);
 
         self.subPluginTabExists = function(id) {
             return $('#settings_plugin_' + id).length > 0
