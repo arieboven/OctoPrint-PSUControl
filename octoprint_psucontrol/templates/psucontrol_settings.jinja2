@@ -5,8 +5,25 @@
             <label class="checkbox">
             <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enablePowerOffWarningDialog"> Show warning dialog when powering off via toggle button.
             </label>
+        </div>
+    </div>
+    <div class="control-group">
+        <div class="controls">
             <label class="checkbox">
-            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enableIdleCountdownTimer"> Show idle countdown timer in the navbar.
+            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enableNavBar"> Show PSU Control the navbar.
+            </label>
+            <label class="checkbox" style="margin-left:20px">
+            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enableIdleCountdownTimerNavBar, enable: settings.plugins.psucontrol.enableNavBar"> Show idle countdown timer in the navbar.
+            </label>
+        </div>
+    </div>
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enableSideBar"> Show PSU Control the sidebar.
+            </label>
+            <label class="checkbox" style="margin-left:20px">
+            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enableIdleCountdownTimerSideBar, enable: settings.plugins.psucontrol.enableSideBar"> Show idle countdown timer in the sidebar.
             </label>
         </div>
     </div>

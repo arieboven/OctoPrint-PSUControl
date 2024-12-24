@@ -100,7 +100,10 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             autoOn = False,
             autoOnTriggerGCodeCommands = "G0,G1,G2,G3,G10,G11,G28,G29,G32,M104,M106,M109,M140,M190",
             enablePowerOffWarningDialog = True,
-            enableIdleCountdownTimer = True,
+            enableNavBar = True,
+            enableSideBar = True,
+            enableIdleCountdownTimerNavBar = True,
+            enableIdleCountdownTimerSideBar = True,
             powerOffWhenIdle = False,
             idleTimeout = 30,
             idleIgnoreCommands = 'M105',
@@ -328,8 +331,12 @@ class PSUControl(octoprint.plugin.StartupPlugin,
     def _set_start_time(self):
         self._idleStartTime = time.time()
 
+    def _countdown_visible(self):
+        return ((self.config['enableNavBar'] and self.config['enableIdleCountdownTimerNavBar']) or
+                (self.config['enableSideBar'] and self.config['enableIdleCountdownTimerSideBar']))
+
     def _refresh_countdown(self):
-        if self._idleStartTime == 0 or not self.config['powerOffWhenIdle'] or not self.config['enableIdleCountdownTimer'] or self._printer.is_printing() or self._printer.is_paused():
+        if self._idleStartTime == 0 or not self.config['powerOffWhenIdle'] or not self._countdown_visible() or self._printer.is_printing() or self._printer.is_paused():
             self.idleTimeLeft = None
         else:
             self.idleTimeLeft = time.strftime("%-M:%S", time.gmtime((self.config['idleTimeout'] * 60) - (time.time() - self._idleStartTime)))
@@ -830,7 +837,18 @@ class PSUControl(octoprint.plugin.StartupPlugin,
 
     def get_template_configs(self):
         return [
-            dict(type="settings", custom_bindings=True)
+            dict(
+                type="sidebar",
+                icon="bolt",
+                template="psucontrol_sidebar.jinja2",
+                custom_bindings=True
+            ),
+            dict(
+                type="settings",
+                name="PSU Control",
+                template="psucontrol_settings.jinja2",
+                custom_bindings=True
+            )
         ]
 
 
@@ -838,7 +856,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
         return {
             "js": ["js/psucontrol.js"],
             "less": ["less/psucontrol.less"],
-            "css": ["css/psucontrol.min.css"]
+            "css": ["css/psucontrol.css", "css/psucontrol.min.css"]
         } 
 
 

@@ -15,8 +15,13 @@ $(function() {
 
         self.isPSUOn = ko.observable(undefined);
         self.idleTimeLeft = ko.observable(undefined);
+        self.idleTimeLeftString = ko.pureComputed(function () {
+            if (self.isPSUOn() && !(self.idleTimeLeft() === null || self.idleTimeLeft() === undefined)) return self.idleTimeLeft();
+            return "-";
+        });
 
         self.psu_indicator = $("#psucontrol_indicator");
+        self.psu_switch = $("#sidebar_plugin_psucontrol_wrapper");
 
         self.onBeforeBinding = function() {
             self.settings = self.settingsViewModel.settings;
@@ -40,6 +45,18 @@ $(function() {
                 if (newValue === "_GET_MORE_") {
                     self.openGetMore();
                     self.settings.plugins.psucontrol.switchingPlugin(self.switchingPlugin_old);
+                }
+            });
+
+            if (self.settings.plugins.psucontrol.enableSideBar() === false) {
+                self.psu_switch.addClass("hide");
+            }
+
+            self.settings.plugins.psucontrol.enableSideBar.subscribe(function(newValue) {
+                if (newValue === true) {
+                    self.psu_switch.removeClass("hide");
+                } else {
+                    self.psu_switch.removeClass("hide").addClass("hide");
                 }
             });
 
@@ -76,9 +93,11 @@ $(function() {
         self.onStartup = function () {
             self.isPSUOn.subscribe(function() {
                 if (self.isPSUOn()) {
-                    self.psu_indicator.removeClass("off").addClass("on");
+                    self.psu_indicator.removeClass("psu_off").addClass("psu_on");
+                    self.psu_switch.removeClass("psu_off").addClass("psu_on");
                 } else {
-                    self.psu_indicator.removeClass("on").addClass("off");
+                    self.psu_indicator.removeClass("psu_on").addClass("psu_off");
+                    self.psu_switch.removeClass("psu_on").addClass("psu_off");
                 }   
             });
 
@@ -138,7 +157,7 @@ $(function() {
             })
         };
 
-    	self.turnPSUOff = function() {
+        self.turnPSUOff = function() {
             $.ajax({
                 url: API_BASEURL + "plugin/psucontrol",
                 type: "POST",
@@ -159,9 +178,9 @@ $(function() {
         };
     }
 
-    ADDITIONAL_VIEWMODELS.push([
-        PSUControlViewModel,
-        ["settingsViewModel", "loginStateViewModel"],
-        ["#navbar_plugin_psucontrol", "#settings_plugin_psucontrol"]
-    ]);
+    OCTOPRINT_VIEWMODELS.push({
+        construct: PSUControlViewModel,
+        dependencies: ["settingsViewModel", "loginStateViewModel"],
+        elements: ["#navbar_plugin_psucontrol", "#settings_plugin_psucontrol", "#sidebar_plugin_psucontrol"]
+    });
 });

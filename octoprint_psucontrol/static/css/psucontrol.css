@@ -1,0 +1,32 @@
+#sidebar_plugin_psucontrol_wrapper.psu_on .fa {
+        color:#0F0;
+}
+
+#sidebar_plugin_psucontrol_wrapper.psu_off .fa {
+        color:#F00;
+}
+
+#psucontrol_indicator.psu_on .icon-bolt {
+        color:#0F0;
+}
+
+#psucontrol_indicator.psu_off .icon-bolt {
+        color:#F00;
+}
+
+#sidebar_plugin_psucontrol_wrapper.hide .fa {
+        display: none;
+}
+
+#sidebar_plugin_psucontrol_wrapper button {
+        margin: 10px 0;
+}
+
+#sidebar_plugin_psucontrol_wrapper label {
+        margin: 10px 0;
+}
+
+#sidebar_plugin_psucontrol_wrapper .override {
+        border-bottom: 1px solid rgb(221, 221, 221);
+        margin-bottom: 5px;
+}
