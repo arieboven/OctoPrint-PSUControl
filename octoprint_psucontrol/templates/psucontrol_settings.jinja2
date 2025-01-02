@@ -295,4 +295,105 @@
             </label>
         </div>
     </div>
+    <h4>External buttons/leds</h4>
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enableExternalButtonPSUOn"> Enable external button to turn PSU on.
+            </label>
+        </div>
+    </div>
+    <!-- ko if: settings.plugins.psucontrol.enableExternalButtonPSUOn() -->
+    <div class="control-group row-fluid">
+        <label class="control-label">PSU on GPIO Pin</label>
+        <div class="row-fluid span6">
+            <div class="input-prepend span4">
+                <span class="add-on span6">GPIO</span>
+                <input class="span6" type="number" data-bind="value: settings.plugins.psucontrol.externalButtonPSUOn"/>
+            </div>
+            <div class="input-prepend span4">
+                <span class="add-on span6">Active</span>
+                <select class="btn-group span6" data-bind="value: settings.plugins.psucontrol.externalButtonPSUOnActiveMode">
+                    <option value="low">LOW</option>
+                    <option value="high">HIGH</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    <!-- /ko -->
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enableExternalLedPSUOn"> Enable external led PSU on.
+            </label>
+        </div>
+    </div>
+    <!-- ko if: settings.plugins.psucontrol.enableExternalLedPSUOn() -->
+    <div class="control-group row-fluid">
+        <label class="control-label">PSU led GPIO Pin</label>
+        <div class="row-fluid span6">
+            <div class="input-prepend span4">
+                <span class="add-on span6">GPIO</span>
+                <input class="span6" type="number" data-bind="value: settings.plugins.psucontrol.externalLedPSUOn"/>
+            </div>
+            <div class="input-prepend span4">
+                <span class="add-on span6">Active</span>
+                <select class="btn-group span6" data-bind="value: settings.plugins.psucontrol.externalLedPSUOnActiveMode">
+                    <option value="low">LOW</option>
+                    <option value="high">HIGH</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    <!-- /ko -->
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enableExternalButtonOverride"> Enable external button to toggle override.
+            </label>
+        </div>
+    </div>
+    <!-- ko if: settings.plugins.psucontrol.enableExternalButtonOverride() -->
+    <div class="control-group row-fluid">
+        <label class="control-label">Override GPIO Pin</label>
+        <div class="row-fluid span6">
+            <div class="input-prepend span4">
+                <span class="add-on span6">GPIO</span>
+                <input class="span6" type="number" data-bind="value: settings.plugins.psucontrol.externalButtonOverride"/>
+            </div>
+            <div class="input-prepend span4">
+                <span class="add-on span6">Active</span>
+                <select class="btn-group span6" data-bind="value: settings.plugins.psucontrol.externalButtonOverrideActiveMode">
+                    <option value="low">LOW</option>
+                    <option value="high">HIGH</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    <!-- /ko -->
+    <div class="control-group">
+        <div class="controls">
+            <label class="checkbox">
+            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.enableExternalLedOverride"> Enable external led override.
+            </label>
+        </div>
+    </div>
+    <!-- ko if: settings.plugins.psucontrol.enableExternalLedOverride() -->
+    <div class="control-group row-fluid">
+        <label class="control-label">Override led GPIO Pin</label>
+        <div class="row-fluid span6">
+            <div class="input-prepend span4">
+                <span class="add-on span6">GPIO</span>
+                <input class="span6" type="number" data-bind="value: settings.plugins.psucontrol.externalLedOverride"/>
+            </div>
+            <div class="input-prepend span4">
+                <span class="add-on span6">Active</span>
+                <select class="btn-group span6" data-bind="value: settings.plugins.psucontrol.externalLedOverrideActiveMode">
+                    <option value="low">LOW</option>
+                    <option value="high">HIGH</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    <!-- /ko -->
 </form>

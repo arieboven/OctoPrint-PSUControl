@@ -110,7 +110,19 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             idleIgnoreCommands = 'M105',
             idleTimeoutWaitTemp = 50,
             turnOnWhenApiUploadPrint = False,
-            turnOffWhenError = False
+            turnOffWhenError = False,
+            enableExternalButtonPSUOn = False,
+            externalButtonPSUOn = 0,
+            externalButtonPSUOnActiveMode = "low",
+            enableExternalLedPSUOn = False,
+            externalLedPSUOn = 0,
+            externalLedPSUOnActiveMode = "low",
+            enableExternalButtonOverride = False,
+            externalButtonOverride = 0,
+            externalButtonOverrideActiveMode = "low",
+            enableExternalLedOverride = False,
+            externalLedOverride = 0,
+            externalLedOverrideActiveMode = "low",
         )
 
 
@@ -246,6 +258,35 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             self._sub_plugins[k] = implementation
 
 
+    def _write_to_GPIO(self, name: str, state: bool, gpio_pin: int, invert: bool):
+        if name not in self._configuredGPIOPins:
+            return
+
+        self._logger.debug("Switching GPIO: {}".format(gpio_pin))
+        pin_output = bool(state ^ invert)
+
+        try:
+            self._configuredGPIOPins[name].write(pin_output)
+        except Exception:
+            self._logger.exception("Exception while writing GPIO line")
+
+
+    def update_psu_led(self, state: bool):
+        if not self.config["enableExternalLedPSUOn"]:
+            return
+        
+        self._write_to_GPIO("led_psu", state, self.config["externalLedPSUOn"],\
+                (self.config["externalLedPSUOnActiveMode"] == 'low'))
+
+
+    def update_override_led(self, state: bool):
+        if not self.conig["enableExternalLedOverride"]:
+            return
+        
+        self._write_to_GPIO("led_override", state, self.config["externalLedOverride"],\
+                (self.config["externalLedOverrideActiveMode"] == 'low'))
+
+
     def check_psu_state(self):
         self._check_psu_state_event.set()
 
@@ -318,6 +359,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
 
                 event = Events.PLUGIN_PSUCONTROL_PSU_STATE_CHANGED
                 self._event_bus.fire(event, payload=dict(isPSUOn=self.isPSUOn))
+                self.update_psu_led(self.isPSUOn)
 
             if (old_isPSUOn != self.isPSUOn) and self.isPSUOn:
                 self._start_idle_timer()
@@ -618,6 +660,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
 
     def set_idle_timer_override(self, state):
         self._idleTimerOverride = state
+        self.update_override_led(state)
         if state:
             self._stop_idle_timer()
         else:
