@@ -29,13 +29,12 @@
     </div>
     <!-- ko if: settings.plugins.psucontrol.switchingMethod() === "GPIO" || settings.plugins.psucontrol.sensingMethod() === "GPIO" -->
     <div class="control-group">
-        <label class="control-label">GPIO Device</label>
+        <label class="control-label">GPIO Mode</label>
         <div class="controls">
-            <select data-bind="value: settings.plugins.psucontrol.GPIODevice">
-                {% for item in plugin_psucontrol_availableGPIODevices %}
-                <option value="{{ item }}">{{ item }}</option>
-                {% endfor %}
-            </select>
+			<select data-bind="value: settings.plugins.psucontrol.GPIOMode">
+				<option value="BOARD">BOARD</option>
+				<option value="BCM">BCM</option>
+			</select>
             <span class="help-inline">Pin numbers correspond to what is exposed by the GPIO device.</span>
             <span class="help-inline"><span class="label label-important">Raspberry Pi Users: Use BCM numbering.</span> See: <a href="https://pinout.xyz" target="_new">https://pinout.xyz</a></span>
         </div>
@@ -56,10 +55,20 @@
         </div>
     </div>
     <!-- ko if: settings.plugins.psucontrol.switchingMethod() === "GPIO" -->
-    <div class="control-group">
+    <div class="control-group row-fluid">
         <label class="control-label">On/Off GPIO Pin</label>
-        <div class="controls">
-            <input type="number" min="0" class="input-mini" data-bind="value: settings.plugins.psucontrol.onoffGPIOPin"> <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.invertonoffGPIOPin"> Invert
+        <div class="row-fluid span6">
+            <div class="input-prepend span4">
+                <span class="add-on span6">GPIO</span>
+                <input class="span6" type="number" data-bind="value: settings.plugins.psucontrol.onoffGPIOPin"/>
+            </div>
+            <div class="input-prepend span4">
+                <span class="add-on span6">Active</span>
+                <select class="btn-group span6" data-bind="value: settings.plugins.psucontrol.onoffGPIOActiveMode">
+                    <option value="low">LOW</option>
+                    <option value="high">HIGH</option>
+                </select>
+            </div>
         </div>
     </div>
     <!-- /ko -->
@@ -150,21 +159,20 @@
         </div>
     </div>
     <!-- ko if: settings.plugins.psucontrol.sensingMethod() === "GPIO" -->
-    <div class="control-group">
+    <div class="control-group row-fluid">
         <label class="control-label">Sensing GPIO Pin</label>
-        <div class="controls">
-            <input type="number" min="0" class="input-mini" data-bind="value: settings.plugins.psucontrol.senseGPIOPin">
-            <select data-bind="value: settings.plugins.psucontrol.senseGPIOPinPUD" class="input-medium" title="Bias" {% if not plugin_psucontrol_supportsLineBias %}disabled{% endif %}>
-                <option value="">Float</option>
-                <option value="PULL_UP">Pull-Up</option>
-                <option value="PULL_DOWN">Pull-Down</option>
-            </select>
-            <input type="checkbox" data-bind="checked: settings.plugins.psucontrol.invertsenseGPIOPin"> Invert
-            <br/>
-
-            <!-- ko if: "{% if not plugin_psucontrol_supportsLineBias %}True{%else%}False{% endif %}" === "True" -->
-            <span class="help-inline label label-important">Linux Kernel 5.5 or greater required for input bias support. <a href="https://github.com/kantlivelong/OctoPrint-PSUControl/wiki/Troubleshooting#known-issues" target="_blank">More Info</a></span>
-            <!-- /ko -->
+        <div class="row-fluid span6">
+            <div class="input-prepend span4">
+                <span class="add-on span6">GPIO</span>
+                <input class="span6" type="number" data-bind="value: settings.plugins.psucontrol.senseGPIOPin"/>
+            </div>
+            <div class="input-prepend span4">
+                <span class="add-on span6">Active</span>
+                <select class="btn-group span6" data-bind="value: settings.plugins.psucontrol.senseGPIOActiveMode">
+                    <option value="low">LOW</option>
+                    <option value="high">HIGH</option>
+                </select>
+            </div>
         </div>
     </div>
     <!-- /ko -->

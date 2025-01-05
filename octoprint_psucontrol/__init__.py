@@ -11,27 +11,18 @@ from octoprint.util import RepeatedTimer
 import time
 import subprocess
 import threading
-import glob
 from flask import make_response, jsonify
 from flask_babel import gettext
-import platform
 from octoprint.util import fqfn
 from octoprint.settings import valid_boolean_trues
 import flask
 from . import cli
 
 try:
-    import periphery
+    import RPi.GPIO as GPIO
     HAS_GPIO = True
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError, RuntimeError):
     HAS_GPIO = False
-
-try:
-    KERNEL_VERSION = tuple([int(s) for s in platform.release().split(".")[:2]])
-except ValueError:
-    KERNEL_VERSION = (0, 0)
-
-SUPPORTS_LINE_BIAS = KERNEL_VERSION >= (5, 5)
 
 try:
     from octoprint.access.permissions import Permissions
@@ -54,7 +45,6 @@ class PSUControl(octoprint.plugin.StartupPlugin,
 
     def __init__(self):
         self._sub_plugins = dict()
-        self._availableGPIODevices = self.get_gpio_devs()
 
         self.config = dict()
 
@@ -73,13 +63,26 @@ class PSUControl(octoprint.plugin.StartupPlugin,
         self._noSensing_isPSUOn = False
         self.isPSUOn = False
 
+        if GPIO.RPI_REVISION == 1:
+            self._pin_to_gpio = [-1, -1, -1, 0, -1, 1, -1, 4, 14, -1, 15, \
+                    17, 18, 21, -1, 22, 23, -1, 24, 10, -1, 9, 25, 11, 8, -1, \
+                    7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ]
+        elif GPIO.RPI_REVISION == 2:
+            self._pin_to_gpio = [-1, -1, -1, 2, -1, 3, -1, 4, 14, -1, 15, \
+                    17, 18, 27, -1, 22, 23, -1, 24, 10, -1, 9, 25, 11, 8, -1, \
+                    7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ]
+        else:
+            self._pin_to_gpio = [-1, -1, -1, 2, -1, 3, -1, 4, 14, -1, 15, \
+                    17, 18, 27, -1, 22, 23, -1, 24, 10, -1, 9, 25, 11, 8, -1, \
+                    7, -1, -1, 5, -1, 6, 12, 13, -1, 19, 16, 26, 20, -1, 21 ]
+
 
     def get_settings_defaults(self):
         return dict(
-            GPIODevice = '',
+            GPIOMode = 'BOARD',
             switchingMethod = 'GCODE',
             onoffGPIOPin = 0,
-            invertonoffGPIOPin = False,
+            onoffGPIOActiveMode = 'high',
             onGCodeCommand = 'M80',
             offGCodeCommand = 'M81',
             onSysCommand = '',
@@ -94,8 +97,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             sensingMethod = 'INTERNAL',
             senseGPIOPin = 0,
             sensePollingInterval = 5,
-            invertsenseGPIOPin = False,
-            senseGPIOPinPUD = '',
+            senseGPIOActiveMode = "low",
             senseSystemCommand = '',
             sensingPlugin = '',
             autoOn = False,
@@ -116,13 +118,13 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             externalButtonPSUOnActiveMode = "low",
             enableExternalLedPSUOn = False,
             externalLedPSUOn = 0,
-            externalLedPSUOnActiveMode = "low",
+            externalLedPSUOnActiveMode = "high",
             enableExternalButtonOverride = False,
             externalButtonOverride = 0,
             externalButtonOverrideActiveMode = "low",
             enableExternalLedOverride = False,
             externalLedOverride = 0,
-            externalLedOverrideActiveMode = "low",
+            externalLedOverrideActiveMode = "high",
         )
 
 
@@ -160,6 +162,16 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             self._logger.error("Unable to use GPIO for sensingMethod.")
             self.config['sensingMethod'] = ''
 
+        if (self.config['enableExternalButtonPSUOn'] or self.config['enableExternalButtonOverride']) and not HAS_GPIO:
+            self._logger.error("Unable to use GPIO for external button.")
+            self.config['enableExternalButtonPSUOn'] = False
+            self.config['enableExternalButtonOverride'] = False
+
+        if (self.config['enableExternalLedPSUOn'] or self.config['enableExternalLedOverride']) and not HAS_GPIO:
+            self._logger.error("Unable to use GPIO for external led.")
+            self.config['enableExternalLedPSUOn'] = False
+            self.config['enableExternalLedOverride'] = False
+
         if self.config['enablePseudoOnOff'] and self.config['switchingMethod'] == 'GCODE':
             self._logger.warning("Pseudo On/Off cannot be used in conjunction with GCODE switching. Disabling.")
             self.config['enablePseudoOnOff'] = False
@@ -179,67 +191,140 @@ class PSUControl(octoprint.plugin.StartupPlugin,
         self._start_idle_timer()
 
 
-    def get_gpio_devs(self):
-        return sorted(glob.glob('/dev/gpiochip*'))
+    def _gpio_get_pin(self, pin):
+        try:
+            if (GPIO.getmode() == GPIO.BOARD and self.config['GPIOMode'] == 'BOARD') or \
+                    (GPIO.getmode() == GPIO.BCM and self.config['GPIOMode'] == 'BCM'):
+                return pin
+            elif GPIO.getmode() == GPIO.BOARD and self.config['GPIOMode'] == 'BCM':
+                return self._pin_to_gpio.index(pin)
+            elif GPIO.getmode() == GPIO.BCM and self.config['GPIOMode'] == 'BOARD':
+                return self._pin_to_gpio[pin]
+            else:
+                return 0
+        except (ValueError, IndexError):
+            return 0
+
+
+    def _event_gpio_btn(self, channel):
+        btn_name = None
+        for name, options in self._configuredGPIOPins.items():
+            if channel == options[0]:
+                btn_name = name
+                break
+
+        if btn_name == None:
+            return
+
+        if btn_name == "ext_btn_psuon":
+            if not self.isPSUOn:
+                self.turn_psu_on()
+        elif btn_name == "ext_btn_ovr":
+            if self.isPSUOn:
+                self.set_idle_timer_override(not self._idleTimerOverride)
+        else:
+            self._logger.exception(
+                "Exception GPIO event triggered for {} pin {}, no action linked.".format(btn_name, channel)
+            )
 
 
     def cleanup_gpio(self):
-        for k, pin in self._configuredGPIOPins.items():
-            self._logger.debug("Cleaning up {} pin {}".format(k, pin.name))
+        GPIO.setwarnings(False)
+
+        for name, options in self._configuredGPIOPins.items():
+            self._logger.debug("Cleaning up {} pin {}".format(name, options[0]))
             try:
-                pin.close()
+                GPIO.cleanup(options[0])
             except Exception:
                 self._logger.exception(
-                    "Exception while cleaning up {} pin {}.".format(k, pin.name)
+                    "Exception while cleaning up {} pin {}.".format(name, options[0])
                 )
         self._configuredGPIOPins = {}
 
 
+    def _configure_output_gpio(self, name: str, pin: int, active_mode: str):
+        if pin <= 0:
+            self._logger.error("GPIO pin is not valid")
+            return
+
+        self._logger.info("Configuring output GPIO for {} pin {}".format(name, pin))
+
+        default_low = GPIO.LOW if active_mode == "high" else GPIO.HIGH
+
+        try:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, default_low)
+            self._configuredGPIOPins[name] = [pin, active_mode]
+        except Exception:
+            self._logger.exception(
+                "Exception while setting up GPIO pin {}".format(pin)
+            )
+
+
+    def _configure_input_gpio(self, name: str, pin: int, active_mode: str, press_trigger: any = None):
+        if pin <= 0:
+            return
+
+        self._logger.info("Configuring output GPIO for {} pin {}".format(name, pin))
+
+        pull_up_down = GPIO.PUD_UP if active_mode == "low" else GPIO.PUD_DOWN
+        gpio_event = GPIO.RISING if active_mode == "low" else GPIO.FALLING
+
+        try:
+            GPIO.setup(pin, GPIO.IN, pull_up_down=pull_up_down)
+            if not press_trigger == None:
+                GPIO.remove_event_detect(pin)
+                GPIO.add_event_detect(
+                    pin,
+                    gpio_event,
+                    callback=press_trigger,
+                    bouncetime=200
+                )
+            self._configuredGPIOPins[name] = [pin, active_mode]
+        except Exception:
+            self._logger.exception(
+                "Exception while setting up GPIO pin {}".format(pin)
+            )
+
+
     def configure_gpio(self):
-        self._logger.info("Periphery version: {}".format(periphery.version))
+        if not HAS_GPIO:
+            self._logger.error("Error importing RPi.GPIO.")
+            return
+
+        GPIO.setwarnings(False)
+
+        if GPIO.getmode() is None:
+            if self.config['GPIOMode'] == 'BOARD':
+                GPIO.setmode(GPIO.BOARD)
+            elif self.config['GPIOMode'] == 'BCM':
+                GPIO.setmode(GPIO.BCM)
+            else:
+                return
 
         if self.config['switchingMethod'] == 'GPIO':
-            self._logger.info("Using GPIO for On/Off")
-            self._logger.info("Configuring GPIO for pin {}".format(self.config['onoffGPIOPin']))
-
-            if not self.config['invertonoffGPIOPin']:
-                initial_output = 'low'
-            else:
-                initial_output = 'high'
-
-            try:
-                pin = periphery.GPIO(self.config['GPIODevice'], self.config['onoffGPIOPin'], initial_output)
-                self._configuredGPIOPins['switch'] = pin
-            except Exception:
-                self._logger.exception(
-                    "Exception while setting up GPIO pin {}".format(self.config['onoffGPIOPin'])
-                )
+            self._configure_output_gpio("switch", self._gpio_get_pin(self.config['onoffGPIOPin']), \
+                    self.config['onoffGPIOActiveMode'])
 
         if self.config['sensingMethod'] == 'GPIO':
-            self._logger.info("Using GPIO sensing to determine PSU on/off state.")
-            self._logger.info("Configuring GPIO for pin {}".format(self.config['senseGPIOPin']))
+            self._configure_input_gpio("sense", self._gpio_get_pin(self.config['senseGPIOPin']), \
+                    self.config['senseGPIOPinPUD'])
 
+        if self.config['enableExternalButtonPSUOn']:
+            self._configure_input_gpio("ext_btn_psuon", self._gpio_get_pin(self.config['externalButtonPSUOn']),\
+                    self.config['externalButtonPSUOnActiveMode'], self._event_gpio_btn)
+        if self.config['enableExternalLedPSUOn']:
+            self._configure_output_gpio("ext_led_psuon", self._gpio_get_pin(self.config['externalLedPSUOn']),\
+                    self.config['externalLedPSUOnActiveMode'])
+            self.update_psu_led(self.isPSUOn)
 
-            if not SUPPORTS_LINE_BIAS:
-                if self.config['senseGPIOPinPUD'] != '':
-                    self._logger.warning("Kernel version 5.5 or greater required for GPIO bias. Using 'default'.")
-                bias = "default"
-            elif self.config['senseGPIOPinPUD'] == '':
-                bias = "disable"
-            elif self.config['senseGPIOPinPUD'] == 'PULL_UP':
-                bias = "pull_up"
-            elif self.config['senseGPIOPinPUD'] == 'PULL_DOWN':
-                bias = "pull_down"
-            else:
-                bias = "default"
-
-            try:
-                pin = periphery.CdevGPIO(path=self.config['GPIODevice'], line=self.config['senseGPIOPin'], direction='in', bias=bias)
-                self._configuredGPIOPins['sense'] = pin
-            except Exception:
-                self._logger.exception(
-                    "Exception while setting up GPIO pin {}".format(self.config['senseGPIOPin'])
-                )
+        if self.config['enableExternalButtonOverride']:
+            self._configure_input_gpio("ext_btn_ovr", self._gpio_get_pin(self.config['externalButtonOverride']),\
+                    self.config['externalButtonOverrideActiveMode'], self._event_gpio_btn)
+        if self.config['enableExternalLedOverride']:
+            self._configure_output_gpio("ext_led_ovr", self._gpio_get_pin(self.config['externalLedOverride']),\
+                    self.config['externalLedOverrideActiveMode'])
+            self.update_override_led(self._idleTimerOverride)
 
 
     def _get_plugin_key(self, implementation):
@@ -258,33 +343,41 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             self._sub_plugins[k] = implementation
 
 
-    def _write_to_GPIO(self, name: str, state: bool, gpio_pin: int, invert: bool):
-        if name not in self._configuredGPIOPins:
+    def _write_to_GPIO(self, name: str, state: bool) -> bool:
+        if name not in self._configuredGPIOPins.keys():
             return
 
-        self._logger.debug("Switching GPIO: {}".format(gpio_pin))
-        pin_output = bool(state ^ invert)
+        gpio_pin = self._configuredGPIOPins[name][0]
+        active_mode = self._configuredGPIOPins[name][1]
+
+        if state:
+            pin_output = GPIO.HIGH if active_mode == "high" else GPIO.LOW
+        else:
+            pin_output = GPIO.LOW if active_mode == "high" else GPIO.HIGH
+
+        self._logger.debug("Switching GPIO: {}, state: {}".format(gpio_pin, pin_output))
 
         try:
-            self._configuredGPIOPins[name].write(pin_output)
+            GPIO.output(gpio_pin, pin_output)
         except Exception:
             self._logger.exception("Exception while writing GPIO line")
+            return False
+
+        return True
 
 
     def update_psu_led(self, state: bool):
         if not self.config["enableExternalLedPSUOn"]:
             return
         
-        self._write_to_GPIO("led_psu", state, self.config["externalLedPSUOn"],\
-                (self.config["externalLedPSUOnActiveMode"] == 'low'))
+        self._write_to_GPIO("ext_led_psuon", state)
 
 
     def update_override_led(self, state: bool):
-        if not self.conig["enableExternalLedOverride"]:
+        if not self.config["enableExternalLedOverride"]:
             return
         
-        self._write_to_GPIO("led_override", state, self.config["externalLedOverride"],\
-                (self.config["externalLedOverrideActiveMode"] == 'low'))
+        self._write_to_GPIO("ext_led_ovr", state)
 
 
     def check_psu_state(self):
@@ -300,13 +393,13 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             if self.config['sensingMethod'] == 'GPIO':
                 r = 0
                 try:
-                    r = self._configuredGPIOPins['sense'].read()
+                    r = GPIO.input(self._configuredGPIOPins["sense"][0])
                 except Exception:
                     self._logger.exception("Exception while reading GPIO line")
 
                 self._logger.debug("Result: {}".format(r))
 
-                new_isPSUOn = r ^ self.config['invertsenseGPIOPin']
+                new_isPSUOn = r ^ (1 if self.config['senseGPIOActiveMode'] == "low" else 0)
 
                 self.isPSUOn = new_isPSUOn
             elif self.config['sensingMethod'] == 'SYSTEM':
@@ -365,6 +458,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
                 self._start_idle_timer()
             elif (old_isPSUOn != self.isPSUOn) and not self.isPSUOn:
                 self._stop_idle_timer()
+                self.set_idle_timer_override(False)
 
             self._plugin_manager.send_plugin_message(self._identifier, dict(isPSUOn=self.isPSUOn))
 
@@ -547,13 +641,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
 
                 self._logger.debug("On system command returned: {}".format(r))
             elif self.config['switchingMethod'] == 'GPIO':
-                self._logger.debug("Switching PSU On Using GPIO: {}".format(self.config['onoffGPIOPin']))
-                pin_output = bool(1 ^ self.config['invertonoffGPIOPin'])
-
-                try:
-                    self._configuredGPIOPins['switch'].write(pin_output)
-                except Exception :
-                    self._logger.exception("Exception while writing GPIO line")
+                if not self._write_to_GPIO("switch", True):
                     return
             elif self.config['switchingMethod'] == 'PLUGIN':
                 p = self.config['switchingPlugin']
@@ -613,13 +701,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
 
                 self._logger.debug("Off system command returned: {}".format(r))
             elif self.config['switchingMethod'] == 'GPIO':
-                self._logger.debug("Switching PSU Off Using GPIO: {}".format(self.config['onoffGPIOPin']))
-                pin_output = bool(0 ^ self.config['invertonoffGPIOPin'])
-
-                try:
-                    self._configuredGPIOPins['switch'].write(pin_output)
-                except Exception:
-                    self._logger.exception("Exception while writing GPIO line")
+                if not self._write_to_GPIO("switch", False):
                     return
             elif self.config['switchingMethod'] == 'PLUGIN':
                 p = self.config['switchingPlugin']
@@ -658,9 +740,13 @@ class PSUControl(octoprint.plugin.StartupPlugin,
         return self.isPSUOn
 
 
-    def set_idle_timer_override(self, state):
+    def set_idle_timer_override(self, state, send_event = True):
         self._idleTimerOverride = state
         self.update_override_led(state)
+
+        if send_event:
+            self._plugin_manager.send_plugin_message(self._identifier, dict(idleTimerOverride=self._idleTimerOverride))
+
         if state:
             self._stop_idle_timer()
         else:
@@ -696,21 +782,23 @@ class PSUControl(octoprint.plugin.StartupPlugin,
         )
 
 
+    @Permissions.STATUS.require(403)
     def on_api_get(self, request):
-        return self.on_api_command("getPSUState", [])
+        action = request.args.get("action", default="", type=str)
+        if action == "":
+            return jsonify(isPSUOn=self.isPSUOn)
+        elif action == 'getPSUState':
+            return jsonify(isPSUOn=self.isPSUOn)
+        elif action == 'getIdleTimerOverride':
+            return jsonify(idleTimerOverride=self._idleTimerOverride)
+        else:
+            return make_response("No api implementation of {}".format(action), 404)
 
 
     def on_api_command(self, command, data):
         if command in ['turnPSUOn', 'turnPSUOff', 'togglePSU', "setPsuOverride"]:
             try:
                 if not Permissions.PLUGIN_PSUCONTROL_CONTROL.can():
-                    return make_response("Insufficient rights", 403)
-            except:
-                if not user_permission.can():
-                    return make_response("Insufficient rights", 403)
-        elif command in ['getPSUState']:
-            try:
-                if not Permissions.STATUS.can():
                     return make_response("Insufficient rights", 403)
             except:
                 if not user_permission.can():
@@ -725,11 +813,9 @@ class PSUControl(octoprint.plugin.StartupPlugin,
                 self.turn_psu_off()
             else:
                 self.turn_psu_on()
-        elif command == 'getPSUState':
-            return jsonify(isPSUOn=self.isPSUOn)
         elif command == "setPsuOverride":
             if 'state' in data.keys():
-                self.set_idle_timer_override(data['state'])
+                self.set_idle_timer_override(data['state'], False)
 
 
     def on_settings_save(self, data):
@@ -753,7 +839,9 @@ class PSUControl(octoprint.plugin.StartupPlugin,
         self.cleanup_gpio()
 
         #configure GPIO
-        if self.config['switchingMethod'] == 'GPIO' or self.config['sensingMethod'] == 'GPIO':
+        if self.config['switchingMethod'] == 'GPIO' or self.config['sensingMethod'] == 'GPIO' or \
+                self.config['enableExternalButtonPSUOn'] or self.config['enableExternalButtonOverride'] or \
+                self.config['enableExternalLedPSUOn'] or self.config['enableExternalLedOverride']:
             self.configure_gpio()
 
         self._start_idle_timer()
@@ -772,115 +860,7 @@ class PSUControl(octoprint.plugin.StartupPlugin,
 
 
     def on_settings_migrate(self, target, current=None):
-        if current is None:
-            current = 0
-
-        if current < 2:
-            # v2 changes names of settings variables to accomidate system commands.
-            cur_switchingMethod = self._settings.get(["switchingMethod"])
-            if cur_switchingMethod is not None and cur_switchingMethod == "COMMAND":
-                self._logger.info("Migrating Setting: switchingMethod=COMMAND -> switchingMethod=GCODE")
-                self._settings.set(["switchingMethod"], "GCODE")
-
-            cur_onCommand = self._settings.get(["onCommand"])
-            if cur_onCommand is not None:
-                self._logger.info("Migrating Setting: onCommand={0} -> onGCodeCommand={0}".format(cur_onCommand))
-                self._settings.set(["onGCodeCommand"], cur_onCommand)
-                self._settings.remove(["onCommand"])
-            
-            cur_offCommand = self._settings.get(["offCommand"])
-            if cur_offCommand is not None:
-                self._logger.info("Migrating Setting: offCommand={0} -> offGCodeCommand={0}".format(cur_offCommand))
-                self._settings.set(["offGCodeCommand"], cur_offCommand)
-                self._settings.remove(["offCommand"])
-
-            cur_autoOnCommands = self._settings.get(["autoOnCommands"])
-            if cur_autoOnCommands is not None:
-                self._logger.info("Migrating Setting: autoOnCommands={0} -> autoOnTriggerGCodeCommands={0}".format(cur_autoOnCommands))
-                self._settings.set(["autoOnTriggerGCodeCommands"], cur_autoOnCommands)
-                self._settings.remove(["autoOnCommands"])
-
-        if current < 3:
-            # v3 adds support for multiple sensing methods
-            cur_enableSensing = self._settings.get_boolean(["enableSensing"])
-            if cur_enableSensing is not None and cur_enableSensing:
-                self._logger.info("Migrating Setting: enableSensing=True -> sensingMethod=GPIO")
-                self._settings.set(["sensingMethod"], "GPIO")
-                self._settings.remove(["enableSensing"])
-
-        if current < 4:
-            # v4 drops RPi.GPIO in favor of Python-Periphery.
-            cur_GPIOMode = self._settings.get(["GPIOMode"])
-            cur_switchingMethod = self._settings.get(["switchingMethod"])
-            cur_sensingMethod = self._settings.get(["sensingMethod"])
-            cur_onoffGPIOPin = self._settings.get_int(["onoffGPIOPin"])
-            cur_invertonoffGPIOPin = self._settings.get_boolean(["invertonoffGPIOPin"])
-            cur_senseGPIOPin = self._settings.get_int(["senseGPIOPin"])
-            cur_invertsenseGPIOPin = self._settings.get_boolean(["invertsenseGPIOPin"])
-            cur_senseGPIOPinPUD = self._settings.get(["senseGPIOPinPUD"])
-
-            if cur_switchingMethod == 'GPIO' or cur_sensingMethod == 'GPIO':
-                if cur_GPIOMode == 'BOARD':
-                    # Convert BOARD pin numbers to BCM
-
-                    def _gpio_board_to_bcm(pin):
-                        _pin_to_gpio_rev1 = [-1, -1, -1, 0, -1, 1, -1, 4, 14, -1, 15, 17, 18, 21, -1, 22, 23, -1, 24, 10, -1, 9, 25, 11, 8, -1, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ]
-                        _pin_to_gpio_rev2 = [-1, -1, -1, 2, -1, 3, -1, 4, 14, -1, 15, 17, 18, 27, -1, 22, 23, -1, 24, 10, -1, 9, 25, 11, 8, -1, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ]
-                        _pin_to_gpio_rev3 = [-1, -1, -1, 2, -1, 3, -1, 4, 14, -1, 15, 17, 18, 27, -1, 22, 23, -1, 24, 10, -1, 9, 25, 11, 8, -1, 7, -1, -1, 5, -1, 6, 12, 13, -1, 19, 16, 26, 20, -1, 21 ]
-
-                        if GPIO.RPI_REVISION == 1:
-                            pin_to_gpio = _pin_to_gpio_rev1
-                        elif GPIO.RPI_REVISION == 2:
-                            pin_to_gpio = _pin_to_gpio_rev2
-                        else:
-                            pin_to_gpio = _pin_to_gpio_rev3
-
-                        return pin_to_gpio[pin]
-
-                    try:
-                        import RPi.GPIO as GPIO
-                        _has_gpio = True
-                    except (ImportError, RuntimeError):
-                        self._logger.exception("Error importing RPi.GPIO. BOARD->BCM conversion will not occur")
-                        _has_gpio = False
-
-                    if cur_switchingMethod == 'GPIO' and _has_gpio:
-                        p = _gpio_board_to_bcm(cur_onoffGPIOPin)
-                        self._logger.info("Converting pin number from BOARD to BCM. onoffGPIOPin={} -> onoffGPIOPin={}".format(cur_onoffGPIOPin, p))
-                        self._settings.set_int(["onoffGPIOPin"], p)
-
-                    if cur_sensingMethod == 'GPIO' and _has_gpio:
-                        p = _gpio_board_to_bcm(cur_senseGPIOPin)
-                        self._logger.info("Converting pin number from BOARD to BCM. senseGPIOPin={} -> senseGPIOPin={}".format(cur_senseGPIOPin, p))
-                        self._settings.set_int(["senseGPIOPin"], p)
-
-                if len(self._availableGPIODevices) > 0:
-                    # This was likely a Raspberry Pi using RPi.GPIO. Set GPIODevice to the first dev found which is likely /dev/gpiochip0
-                    self._logger.info("Setting GPIODevice to the first found. GPIODevice={}".format(self._availableGPIODevices[0]))
-                    self._settings.set(["GPIODevice"], self._availableGPIODevices[0])
-                else:
-                    # GPIO was used for either but no GPIO devices exist. Reset to defaults.
-                    self._logger.warning("No GPIO devices found. Reverting switchingMethod and sensingMethod to defaults.")
-                    self._settings.remove(["switchingMethod"])
-                    self._settings.remove(["sensingMethod"])
-
-
-                # Write the config to psucontrol_rpigpio just in case the user decides/needs to switch to it.
-                self._logger.info("Writing original GPIO related settings to psucontrol_rpigpio.")
-                self._settings.global_set(['plugins', 'psucontrol_rpigpio', 'GPIOMode'], cur_GPIOMode)
-                self._settings.global_set(['plugins', 'psucontrol_rpigpio', 'switchingMethod'], cur_switchingMethod)
-                self._settings.global_set(['plugins', 'psucontrol_rpigpio', 'sensingMethod'], cur_sensingMethod)
-                self._settings.global_set_int(['plugins', 'psucontrol_rpigpio', 'onoffGPIOPin'], cur_onoffGPIOPin)
-                self._settings.global_set_boolean(['plugins', 'psucontrol_rpigpio', 'invertonoffGPIOPin'], cur_invertonoffGPIOPin)
-                self._settings.global_set_int(['plugins', 'psucontrol_rpigpio', 'senseGPIOPin'], cur_senseGPIOPin)
-                self._settings.global_set_boolean(['plugins', 'psucontrol_rpigpio', 'invertsenseGPIOPin'], cur_invertsenseGPIOPin)
-                self._settings.global_set(['plugins', 'psucontrol_rpigpio', 'senseGPIOPinPUD'], cur_senseGPIOPinPUD)
-            else:
-                self._logger.info("No GPIO pins to convert.")
-
-            # Remove now unused config option
-            self._logger.info("Removing Setting: GPIOMode")
-            self._settings.remove(["GPIOMode"])
+        pass
 
 
     def get_template_vars(self):
@@ -889,10 +869,8 @@ class PSUControl(octoprint.plugin.StartupPlugin,
             available_plugins.append(dict(pluginIdentifier=k, displayName=self._plugin_manager.plugins[k].name))
 
         return {
-            "availableGPIODevices": self._availableGPIODevices,
             "availablePlugins": available_plugins,
             "hasGPIO": HAS_GPIO,
-            "supportsLineBias": SUPPORTS_LINE_BIAS
         }
 
 

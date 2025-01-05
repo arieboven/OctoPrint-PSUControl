@@ -101,12 +101,11 @@ $(function() {
                     self.psu_indicator.removeClass("psu_on").addClass("psu_off");
                     self.psu_switch.removeClass("psu_on").addClass("psu_off");
                 }
-                self.idleTimerOverride(false);
             });
 
             $.ajax({
                 url: API_BASEURL + "plugin/psucontrol",
-                type: "POST",
+                type: "GET",
                 dataType: "json",
                 data: JSON.stringify({
                     command: "getPSUState"
@@ -114,6 +113,18 @@ $(function() {
                 contentType: "application/json; charset=UTF-8"
             }).done(function(data) {
                 self.isPSUOn(data.isPSUOn);
+            });
+
+            $.ajax({
+                url: API_BASEURL + "plugin/psucontrol",
+                type: "GET",
+                dataType: "json",
+                data: JSON.stringify({
+                    command: "getIdleTimerOverride"
+                }),
+                contentType: "application/json; charset=UTF-8"
+            }).done(function(data) {
+                self.idleTimerOverride(data.idleTimerOverride);
             });
         }
 
@@ -128,6 +139,12 @@ $(function() {
 
             if (data.idleTimeLeft !== undefined) {
                 self.idleTimeLeft(data.idleTimeLeft);
+            }
+
+            if (data.idleTimerOverride !== undefined) {
+				if (data.idleTimerOverride !== self.idleTimerOverride()) {
+					self.idleTimerOverride(data.idleTimerOverride);
+				}
             }
         };
 
